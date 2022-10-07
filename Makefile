@@ -20,3 +20,13 @@ app: userapp.c userapp.h
 clean:
 	$(RM) -f userapp *~ *.ko *.o *.mod.c Module.symvers modules.order
 
+ul: unload load 
+
+logs:
+	sudo dmesg | grep "MP2"
+
+load:
+	sudo insmod mp2.ko
+
+unload: 
+	sudo rmmod mp2.ko
