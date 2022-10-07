@@ -186,7 +186,7 @@ int __init mp2_init(void) {
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_create(FILENAME, 0666, proc_dir, &mp2_file_ops);
 
-    mp2_pcb_cache = KMEM_CACHE(mp2_pcb, SLAB_PANIC | SLAB_ACCOUNT);
+    mp2_pcb_cache = KMEM_CACHE(mp2_pcb, SLAB_PANIC);
 
     printk(KERN_ALERT "MP2 MODULE LOADED\n");
     return 0;

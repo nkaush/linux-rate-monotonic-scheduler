@@ -25,6 +25,9 @@ ul: unload load
 logs:
 	sudo dmesg | grep "MP2"
 
+slab_logs: 
+	sudo cat /proc/slabinfo | head -n 10
+
 load:
 	sudo insmod mp2.ko
 
