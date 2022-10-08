@@ -5,6 +5,7 @@
 
 #include <linux/proc_fs.h>
 #include <linux/types.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/list.h>
 
@@ -66,6 +67,15 @@ static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, si
     return 0;
 }
 
+void _mp2_pcb_slab_ctor(void *ptr) {
+    struct mp2_pcb *pcb = ptr;
+
+    pcb->state = SLEEPING;
+
+    // TODO figure out timers
+    // timer_setup(&pcb->wakeup_time, timer_callback, 0);
+}
+
 static size_t _compute_task_rms_usage(size_t period_ms, size_t runtime_ms) {
     size_t numerator = runtime_ms * RMS_MULTIPLIER;
     return numerator / period_ms;
@@ -89,6 +99,20 @@ static void admit_task(struct mp2_pcb *pcb) {
     ++task_list_size;
     current_rms_usage += _compute_task_rms_usage(pcb->period_ms, pcb->runtime_ms);
     spin_unlock(&rp_lock);
+}
+
+static int is_task_admitted(pid_t pid) {
+    struct mp2_pcb *pcb;
+
+    spin_lock(&rp_lock);
+    list_for_each_entry(pcb, &task_list_head, list) {
+        if ( pcb->pid == pid ) {
+            spin_unlock(&rp_lock);
+            return 1;
+        }
+    }
+    spin_unlock(&rp_lock);
+    return 0;
 }
 
 static void deregister_process(pid_t pid) {
@@ -158,6 +182,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         pcb->period_ms = period;
         pcb->runtime_ms = proc_time;
         pcb->pid = pid;
+        pcb->state = SLEEPING;
 
         // TODO:
         // struct timer_list wakeup_time;
@@ -170,6 +195,10 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         deregister_process(pid);
     } else if ( command == 'Y' ) { // PROCESS YIELDED
         printk(PREFIX"pid %d yielded\n", pid);
+
+        if ( !is_task_admitted(pid) ) {
+            // begin scheduling stuff here...
+        }
     }
 
     kfree(kernel_buf);
@@ -186,7 +215,10 @@ int __init mp2_init(void) {
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_create(FILENAME, 0666, proc_dir, &mp2_file_ops);
 
-    mp2_pcb_cache = KMEM_CACHE(mp2_pcb, SLAB_PANIC);
+    // mp2_pcb_cache = KMEM_CACHE(mp2_pcb, SLAB_PANIC);
+    mp2_pcb_cache = kmem_cache_create(
+        "mp2_pcb", sizeof(struct mp2_pcb), __alignof__(struct mp2_pcb), 
+        SLAB_PANIC, _mp2_pcb_slab_ctor);
 
     printk(KERN_ALERT "MP2 MODULE LOADED\n");
     return 0;
