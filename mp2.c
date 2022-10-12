@@ -30,7 +30,8 @@ MODULE_DESCRIPTION("CS-423 MP2");
 enum mp2_task_state {
     READY,
     RUNNING,
-    SLEEPING
+    SLEEPING,
+    UNINITIALIZED
 };
 
 struct mp2_pcb {
@@ -46,6 +47,7 @@ struct mp2_pcb {
 
 // The task that is currently running
 static struct mp2_pcb *current_task = NULL;
+static DEFINE_SPINLOCK(current_task_lock);
 
 // Spinlock synchronizing reads & writes to our list of processes to schedule
 static DEFINE_SPINLOCK(rp_lock);
@@ -96,6 +98,7 @@ static const struct proc_ops mp2_file_ops = {
 };
 
 static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, size_t count, loff_t *off) {
+    // TODO implement
     return 0;
 }
 
@@ -106,14 +109,14 @@ void _mp2_pcb_slab_ctor(void *ptr) {
 
 void _teardown_pcb(struct mp2_pcb *pcb) {
     list_del(&pcb->list);
-    del_timer(&pcb->wakeup_timer);
+    // TODO HOW TO RUN DESTRUCTOR???
+    // del_timer(&pcb->wakeup_timer);
     --task_list_size;
     current_rms_usage -= _compute_task_rms_usage(pcb->period_ms, pcb->runtime_ms);
 }
 
 static size_t _compute_task_rms_usage(size_t period_ms, size_t runtime_ms) {
-    size_t numerator = runtime_ms * RMS_MULTIPLIER;
-    return numerator / period_ms;
+    return (runtime_ms * RMS_MULTIPLIER) / period_ms;
 }
 
 // @return 0 if we cannot admit the task, 1 if we can admit the task
@@ -229,7 +232,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         pcb->period_ms = period;
         pcb->runtime_ms = proc_time;
         pcb->pid = pid;
-        pcb->state = SLEEPING;
+        pcb->state = UNINITIALIZED;
 
         // TODO:
         // unsigned long deadline_jiff;
@@ -243,15 +246,29 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
 
         struct mp2_pcb *pcb = find_mp2_pcb_by_pid(pid);
         if ( pcb != NULL ) {
-            pcb->state = SLEEPING;
-            current_task = NULL;
+            if (pcb->state == UNINITIALIZED) {
+                // TODO when to run rt loop first after this yield???
+                pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
+                pcb->state = READY;
+                // mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
+            } else {
+                pcb->state = SLEEPING;
+                spin_lock(&current_task_lock);
+                current_task = NULL;
+                spin_unlock(&current_task_lock);
 
-            // TODO fix this: 
-            __set_task_state(pcb->linux_task, TASK_UNINTERRUPTIBLE);
+                if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
+                    pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
+                    pcb->state = READY;
+                } else {
+                    mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
+                    pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
+                }
 
-            wake_up_process(dispatcher); // wakeup dispatch thread
+                set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
 
-            // TODO set up timer to fire
+                wake_up_process(dispatcher); // wakeup dispatch thread
+            }
         }
     }
 
@@ -293,6 +310,7 @@ int dispatcher_work(void *data) {
 
     while (!kthread_should_stop()) {
         // we are pre-empting a currently running task
+        spin_lock(&current_task_lock);
         if ( current_task != NULL ) { 
             current_task->state = READY;
 
@@ -301,7 +319,7 @@ int dispatcher_work(void *data) {
             running_attr.sched_priority = 0;
             sched_setattr_nocheck(ready_task->linux_task, &running_attr);
         }
-
+        
         // Find the next task to run
         ready_task = find_next_ready_task();
         if ( ready_task != NULL ) {
@@ -315,6 +333,7 @@ int dispatcher_work(void *data) {
 
             current_task = ready_task;
         }
+        spin_unlock(&current_task_lock);
 
         ready_task = NULL;
         set_current_state(TASK_INTERRUPTIBLE);
