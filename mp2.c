@@ -71,8 +71,6 @@ static size_t _compute_task_rms_usage(size_t period_ms, size_t runtime_ms);
 
 static int can_admit_task(size_t period_ms, size_t runtime_ms);
 
-static int is_task_admitted(pid_t pid);
-
 static void admit_task(struct mp2_pcb *pcb);
 
 static void deregister_task(pid_t pid);
@@ -173,20 +171,6 @@ static struct mp2_pcb * find_mp2_pcb_by_pid(pid_t pid) {
     return NULL;
 }
 
-static int is_task_admitted(pid_t pid) {
-    struct mp2_pcb *pcb;
-
-    spin_lock(&rp_lock);
-    list_for_each_entry(pcb, &task_list_head, list) {
-        if ( pcb->pid == pid ) {
-            spin_unlock(&rp_lock);
-            return 1;
-        }
-    }
-    spin_unlock(&rp_lock);
-    return 0;
-}
-
 static void deregister_task(pid_t pid) {
     struct mp2_pcb *pcb, *tmp;
 
@@ -262,7 +246,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
     } else if ( command == 'Y' ) { // PROCESS YIELDED
         printk(PREFIX"pid %d yielded\n", pid);
 
-        struct mp2_pcb *pcb = find_mp2_pcb_by_pid(pid);
+        pcb = find_mp2_pcb_by_pid(pid);
         if ( pcb != NULL ) {
             pcb->state = SLEEPING;
             spin_lock(&current_task_lock);

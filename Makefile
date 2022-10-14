@@ -20,6 +20,10 @@ app: userapp.c userapp.h
 clean:
 	$(RM) -f userapp *~ *.ko *.o *.mod.c Module.symvers modules.order
 
+wipe: clean
+	find . -name "*.cmd" -delete
+	find . -name "*.mod" -delete
+
 ul: unload load 
 
 logs:
