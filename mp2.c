@@ -31,7 +31,6 @@ enum mp2_task_state {
     READY,
     RUNNING,
     SLEEPING,
-    UNINITIALIZED
 };
 
 struct mp2_pcb {
@@ -98,8 +97,29 @@ static const struct proc_ops mp2_file_ops = {
 };
 
 static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, size_t count, loff_t *off) {
-    // TODO implement
-    return 0;
+    struct mp2_pcb *entry;
+    size_t to_copy = 0;
+    ssize_t copied = 0;
+
+    char *kernel_buf = (char *) kzalloc(count, GFP_KERNEL);
+   
+   // Go through each entry of the list and read + format the pid and cpu use
+    spin_lock(&rp_lock);
+    list_for_each_entry(entry, &task_list_head, list) {
+        if (to_copy >= count) {
+            break;
+        }
+
+        to_copy += 
+            snprintf(kernel_buf + to_copy, count - to_copy, 
+                "%d: %zu, %zu\n", entry->pid, entry->period_ms, entry->runtime_ms);
+    }
+    spin_unlock(&rp_lock);
+
+    copied += simple_read_from_buffer(buffer, count, off, kernel_buf, to_copy);
+    kfree(kernel_buf);
+
+    return copied;
 }
 
 void _mp2_pcb_slab_ctor(void *ptr) {
@@ -232,10 +252,8 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         pcb->period_ms = period;
         pcb->runtime_ms = proc_time;
         pcb->pid = pid;
-        pcb->state = UNINITIALIZED;
-
-        // TODO:
-        // unsigned long deadline_jiff;
+        pcb->state = SLEEPING;
+        pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
 
         admit_task(pcb);
         printk(PREFIX"registered pid %d\n", pid);
@@ -246,29 +264,22 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
 
         struct mp2_pcb *pcb = find_mp2_pcb_by_pid(pid);
         if ( pcb != NULL ) {
-            if (pcb->state == UNINITIALIZED) {
-                // TODO when to run rt loop first after this yield???
+            pcb->state = SLEEPING;
+            spin_lock(&current_task_lock);
+            current_task = NULL;
+            spin_unlock(&current_task_lock);
+
+            if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
+                // todo how to re-compute deadline??
                 pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
                 pcb->state = READY;
-                // mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
             } else {
-                pcb->state = SLEEPING;
-                spin_lock(&current_task_lock);
-                current_task = NULL;
-                spin_unlock(&current_task_lock);
-
-                if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
-                    pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
-                    pcb->state = READY;
-                } else {
-                    mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
-                    pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
-                }
-
-                set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
-
-                wake_up_process(dispatcher); // wakeup dispatch thread
+                mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
+                pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
             }
+
+            set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
+            wake_up_process(dispatcher); // wakeup dispatch thread
         }
     }
 
