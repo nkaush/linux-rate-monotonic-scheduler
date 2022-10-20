@@ -23,7 +23,7 @@ void send_message(char m) {
     char* buf = NULL;
     FILE* f = fopen(MP2_FILE, "w");
 
-    asprintf(&buf, "D,%d", getpid());
+    asprintf(&buf, "%c,%d", m, getpid());
     fwrite(buf, strlen(buf), 1, f);
     fclose(f);
     free(buf);
