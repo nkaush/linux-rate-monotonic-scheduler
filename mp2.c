@@ -75,8 +75,6 @@ static void admit_task(struct mp2_pcb *pcb);
 
 static void deregister_task(pid_t pid);
 
-void _mp2_pcb_slab_ctor(void *ptr);
-
 void _teardown_pcb(struct mp2_pcb *pcb);
 
 int dispatcher_work(void *data);
@@ -120,12 +118,8 @@ static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, si
     return copied;
 }
 
-void _mp2_pcb_slab_ctor(void *ptr) {
-}
-
 void _teardown_pcb(struct mp2_pcb *pcb) {
     list_del(&pcb->list);
-    // TODO HOW TO RUN DESTRUCTOR???
     del_timer_sync(&pcb->wakeup_timer);
     --task_list_size;
     current_rms_usage -= _compute_task_rms_usage(pcb->period_ms, pcb->runtime_ms);
