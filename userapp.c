@@ -14,9 +14,6 @@
 #define DEFAULT_NUM_ITER 15
 #define BASE_10 10
 
-// This fibonacci number should take 320 to 330 ms to compute
-#define FIBONACCI_NUMBER 39
-
 void register_app(size_t period, size_t ptime) {
     char* buf = NULL;
     FILE* f = fopen(MP2_FILE, "w");
@@ -90,7 +87,7 @@ void timespec_difftime(struct timespec *start, struct timespec *finish, struct t
 }
 
 void print_wakeup_and_process_times(struct timespec *wakeup, struct timespec *process) {
-    printf("[%d] wakeup:  %lds %ldns took %lds %ldns\n", getpid(), wakeup->tv_sec, wakeup->tv_nsec, process->tv_sec, process->tv_nsec);
+    printf("[%d] wakeup:  %lds %ldns\ttook\t%lds %ldns\n", getpid(), wakeup->tv_sec, wakeup->tv_nsec, process->tv_sec, process->tv_nsec);
 }
 
 size_t fibonacci(size_t n) {
@@ -107,16 +104,18 @@ int main(int argc, char *argv[]) {
     struct timespec t0, wakeup_time, process_time, now, later;
     size_t num_iterations = DEFAULT_NUM_ITER, i = 0;
     size_t period = 0, ptime = 0;
+    size_t fib_num = 0;
 
-    if ( argc >= 3 ) {
-        period = strtoul(argv[1], NULL, BASE_10);
-        ptime = strtoul(argv[2], NULL, BASE_10);
+    if ( argc >= 4 ) {
+        fib_num = strtoul(argv[1], NULL, BASE_10);
+        period = strtoul(argv[2], NULL, BASE_10);
+        ptime = strtoul(argv[3], NULL, BASE_10);
 
-        if ( argc >= 4 ) {
-            num_iterations = strtoul(argv[3], NULL, BASE_10);
+        if ( argc >= 5 ) {
+            num_iterations = strtoul(argv[4], NULL, BASE_10);
         }
     } else {
-        errx(1, "Usage: %s <period> <processing time> <num cycles (optional)>", argv[0]);
+        errx(1, "Usage: %s <fibonacci> <period> <processing time> <num cycles (optional)>", argv[0]);
     }
 
     register_app(period, ptime);
@@ -131,7 +130,7 @@ int main(int argc, char *argv[]) {
         clock_gettime(CLOCK_REALTIME, &now);
         timespec_difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
 		
-        fibonacci(FIBONACCI_NUMBER);
+        fibonacci(fib_num);
         clock_gettime(CLOCK_REALTIME, &later);
 
         timespec_difftime(&now, &later, &process_time); // process_time = clock_gettime() - wakeup_time;
