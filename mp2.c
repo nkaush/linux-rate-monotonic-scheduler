@@ -242,6 +242,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         admit_task(pcb);
         printk(PREFIX"registered pid %d\n", pid);
     } else if ( command == 'D' ) { // TRY TO DE-REGISTER PROCESS
+        printk(PREFIX"deregister pid %d\n", pid);
         deregister_task(pid);
     } else if ( command == 'Y' ) { // PROCESS YIELDED
         printk(PREFIX"pid %d yielded\n", pid);
@@ -258,6 +259,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
                 pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
                 pcb->state = READY;
             } else {
+                printk(PREFIX"registering timer to trigger at %zu (now: %zu)\n", pcb->deadline_jiff, jiffies);
                 mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
                 pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
             }
@@ -274,6 +276,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
 void yield_timer_callback(struct timer_list *timer) {
     struct mp2_pcb *pcb = from_timer(pcb, timer, wakeup_timer);
     pcb->state = READY;
+    printk(PREFIX"timer for pid=%d triggered\n", pcb->pid);
     wake_up_process(dispatcher); // wakeup dispatch thread
 }
 
@@ -307,6 +310,7 @@ int dispatcher_work(void *data) {
         // we are pre-empting a currently running task
         spin_lock(&current_task_lock);
         if ( current_task != NULL ) { 
+            printk(PREFIX"Stopping task with pid=%d\n", current_task->pid);
             current_task->state = READY;
 
             // Make the Linux scheduler stop this task 
@@ -319,6 +323,7 @@ int dispatcher_work(void *data) {
         ready_task = find_next_ready_task();
         if ( ready_task != NULL ) {
             ready_task->state = RUNNING;
+            printk(PREFIX"Starting to work on task with pid=%d\n", ready_task->pid);
             
             // Make the Linux scheduler run this task with highest priority
             wake_up_process(ready_task->linux_task);
