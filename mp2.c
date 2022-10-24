@@ -231,6 +231,8 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
             return count;
         }
 
+        printk(PREFIX"registering task with pid=%d, period=%zu, ptime=%zu\n", pid, period, proc_time);
+
         pcb = kmem_cache_alloc(mp2_pcb_cache, GFP_KERNEL);
         pcb->linux_task = pid_task;
         pcb->period_ms = period;
@@ -307,6 +309,7 @@ int dispatcher_work(void *data) {
     (void) data;
 
     while (!kthread_should_stop()) {
+        printk(PREFIX"Starting scheduling cycle\n");
         // we are pre-empting a currently running task
         spin_lock(&current_task_lock);
         if ( current_task != NULL ) { 
