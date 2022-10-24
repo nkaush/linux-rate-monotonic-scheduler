@@ -126,7 +126,7 @@ void _mp2_pcb_slab_ctor(void *ptr) {
 void _teardown_pcb(struct mp2_pcb *pcb) {
     list_del(&pcb->list);
     // TODO HOW TO RUN DESTRUCTOR???
-    del_timer(&pcb->wakeup_timer);
+    del_timer_sync(&pcb->wakeup_timer);
     --task_list_size;
     current_rms_usage -= _compute_task_rms_usage(pcb->period_ms, pcb->runtime_ms);
 }
@@ -176,6 +176,12 @@ static void deregister_task(pid_t pid) {
     list_for_each_entry_safe(pcb, tmp, &task_list_head, list) {
         if ( pcb->pid == pid ) {
             printk(PREFIX"removing pid %d from process list\n", pid);
+            spin_lock(&current_task_lock);
+            if ( current_task == pcb ) {
+                current_task = NULL;
+            }
+            spin_unlock(&current_task_lock);
+            
             _teardown_pcb(pcb);
             kmem_cache_free(mp2_pcb_cache, pcb);
             spin_unlock(&rp_lock);
@@ -184,12 +190,6 @@ static void deregister_task(pid_t pid) {
     }
     printk(PREFIX"Unable to deregister pid %d from process list\n", pid);
     spin_unlock(&rp_lock);
-
-    spin_lock(&current_task_lock);
-    if ( curr_task == pcb ) {
-        curr_task = NULL;
-    }
-    spin_unlock(&current_task_lock);
 }
 
 static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buffer, size_t count, loff_t *off) {    
@@ -263,15 +263,16 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
 
             if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
                 // todo how to re-compute deadline??
+                printk(PREFIX"Overshot deadline, keeping ready");
                 pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
                 pcb->state = READY;
             } else {
                 printk(PREFIX"registering timer to trigger at %zu (now: %zu)\n", pcb->deadline_jiff, jiffies);
                 mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
                 pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
+                set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
             }
 
-            set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
             wake_up_process(dispatcher); // wakeup dispatch thread
         }
     }
@@ -314,6 +315,7 @@ int dispatcher_work(void *data) {
     (void) data;
 
     while (!kthread_should_stop()) {
+        printk(PREFIX"-------------------------\n");
         printk(PREFIX"Starting scheduling cycle\n");
         // we are pre-empting a currently running task
         spin_lock(&current_task_lock);
@@ -324,7 +326,8 @@ int dispatcher_work(void *data) {
             // Make the Linux scheduler stop this task 
             running_attr.sched_policy = SCHED_NORMAL;
             running_attr.sched_priority = 0;
-            sched_setattr_nocheck(ready_task->linux_task, &running_attr);
+            sched_setattr_nocheck(current_task->linux_task, &running_attr);
+            current_task = NULL;
         }
         
         // Find the next task to run
@@ -342,6 +345,7 @@ int dispatcher_work(void *data) {
             current_task = ready_task;
         }
         spin_unlock(&current_task_lock);
+        printk(PREFIX"-------------------------\n");
 
         ready_task = NULL;
         set_current_state(TASK_INTERRUPTIBLE);

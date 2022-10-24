@@ -90,8 +90,7 @@ void timespec_difftime(struct timespec *start, struct timespec *finish, struct t
 }
 
 void print_wakeup_and_process_times(struct timespec *wakeup, struct timespec *process) {
-    printf("wakeup:  %lds %ldns\n", wakeup->tv_sec, wakeup->tv_nsec);
-    printf("process: %lds %ldns\n", process->tv_sec, process->tv_nsec);
+    printf("[%d] wakeup:  %lds %ldns took %lds %ldns\n", getpid(), wakeup->tv_sec, wakeup->tv_nsec, process->tv_sec, process->tv_nsec);
 }
 
 size_t fibonacci(size_t n) {
@@ -133,8 +132,8 @@ int main(int argc, char *argv[]) {
         timespec_difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
 		
         fibonacci(FIBONACCI_NUMBER);
-
         clock_gettime(CLOCK_REALTIME, &later);
+
         timespec_difftime(&now, &later, &process_time); // process_time = clock_gettime() - wakeup_time;
 		print_wakeup_and_process_times(&wakeup_time, &process_time);
 		yield_app();
