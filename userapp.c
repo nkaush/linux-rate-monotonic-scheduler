@@ -8,6 +8,7 @@
 #include <err.h>
 
 #define MP2_FILE "/proc/mp2/status"
+#define NS_PER_SECOND 1000000000UL
 
 void register_app(void) {
     char* buf = NULL;
@@ -60,8 +61,16 @@ int is_app_registered(void) {
     return 0;
 }
 
+void timespec_difftime(struct timespec *start, struct timespec *finish, struct timespec *diff) {
+    size_t delta = (finish->tv_sec - start->tv_sec) * NS_PER_SECOND;
+    delta += finish->tv_nsec - start->tv_nsec;
+
+    diff->tv_sec = delta / NS_PER_SECOND;
+    diff->tv_nsec = delta % NS_PER_SECOND;
+}
+
 int main(int argc, char *argv[]) {
-    struct timespec t0, wakeup_time, process_time;
+    struct timespec t0, wakeup_time, process_time, now;
 
     register_app();
 	if ( !is_app_registered() ) {
@@ -72,8 +81,10 @@ int main(int argc, char *argv[]) {
 	yield_app();
 
 	while (exists job) {
-		wakeup_time = clock_gettime() - t0;
-		do_job();
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
+		
+        do_job();
 		process_time = clock_gettime() - wakeup_time;
 		printf(wakeup_time, process_time);
 		yield_app();
