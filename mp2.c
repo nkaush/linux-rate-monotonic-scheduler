@@ -121,14 +121,12 @@ static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, si
 }
 
 void _mp2_pcb_slab_ctor(void *ptr) {
-    struct mp2_pcb *pcb = ptr;
-    timer_setup(&pcb->wakeup_timer, yield_timer_callback, 0);
 }
 
 void _teardown_pcb(struct mp2_pcb *pcb) {
     list_del(&pcb->list);
     // TODO HOW TO RUN DESTRUCTOR???
-    // del_timer(&pcb->wakeup_timer);
+    del_timer(&pcb->wakeup_timer);
     --task_list_size;
     current_rms_usage -= _compute_task_rms_usage(pcb->period_ms, pcb->runtime_ms);
 }
@@ -240,6 +238,7 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         pcb->pid = pid;
         pcb->state = SLEEPING;
         pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
+        timer_setup(&pcb->wakeup_timer, yield_timer_callback, 0);
 
         admit_task(pcb);
         printk(PREFIX"registered pid %d\n", pid);
@@ -374,13 +373,16 @@ void __exit mp2_exit(void) {
     printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
     #endif
     // Remove the proc fs entry
+    printk(PREFIX"Removing proc fs entry\n");
     remove_proc_entry(FILENAME, proc_dir);
     remove_proc_entry(DIRECTORY, NULL);
 
     // Stop our dispatch thread
+    printk(PREFIX"Stopping kthread\n");
     kthread_stop(dispatcher);
 
     // Remove all the processes when removing our scheduler
+    printk(PREFIX"Removing LL nodes\n");
     spin_lock(&rp_lock);
     list_for_each_entry_safe(entry, tmp, &task_list_head, list) {
         printk(PREFIX"removing process with pid %d\n", entry->pid);
@@ -390,6 +392,7 @@ void __exit mp2_exit(void) {
     spin_unlock(&rp_lock);
 
     // Remove our SLAB allocator cache
+    printk(PREFIX"Removing kmem cache\n");
     kmem_cache_destroy(mp2_pcb_cache);
 
     printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
