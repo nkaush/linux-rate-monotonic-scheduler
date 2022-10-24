@@ -1,6 +1,8 @@
 #include "userapp.h"
 
+#define _GNU_SOURCE 1
 #include <sys/types.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,12 +11,21 @@
 
 #define MP2_FILE "/proc/mp2/status"
 #define NS_PER_SECOND 1000000000UL
+#define DEFAULT_NUM_ITER 15
+#define BASE_10 10
 
-void register_app(void) {
+// This fibonacci number should take 320 to 330 ms to compute
+#define FIBONACCI_NUMBER 39
+
+void register_app(size_t period, size_t ptime) {
     char* buf = NULL;
     FILE* f = fopen(MP2_FILE, "w");
 
-    asprintf(&buf, "R,%d,%zu,%zu", getpid());
+    if ( !f ) {
+        err(1, "fopen %s", MP2_FILE);
+    }
+
+    asprintf(&buf, "R,%d,%zu,%zu", getpid(), period, ptime);
     fwrite(buf, strlen(buf), 1, f);
     fclose(f);
     free(buf);
@@ -23,6 +34,10 @@ void register_app(void) {
 void send_message(char m) {
     char* buf = NULL;
     FILE* f = fopen(MP2_FILE, "w");
+
+    if ( !f ) {
+        err(1, "fopen %s", MP2_FILE);
+    }
 
     asprintf(&buf, "%c,%d", m, getpid());
     fwrite(buf, strlen(buf), 1, f);
@@ -41,13 +56,18 @@ void yield_app(void) {
 int is_app_registered(void) {    
     char *lineptr = NULL, *colon = NULL;
     FILE *f = fopen(MP2_FILE, "r");
+
+    if ( !f ) {
+        err(1, "fopen %s", MP2_FILE);
+    }
+
     size_t buf_size = 0;
     pid_t pid = -1;
 
     while ( getline(&lineptr, &buf_size, f) != EOF ) {
         colon = strstr(lineptr, ":");
         *colon = '\0';
-        sscanf(lineptr, "%d", &pid);
+        pid = atoi(lineptr);
 
         if ( pid == getpid() ) {
             free(lineptr);
@@ -69,10 +89,38 @@ void timespec_difftime(struct timespec *start, struct timespec *finish, struct t
     diff->tv_nsec = delta % NS_PER_SECOND;
 }
 
+void print_wakeup_and_process_times(struct timespec *wakeup, struct timespec *process) {
+    printf("wakeup:  %lds %ldns\n", wakeup->tv_sec, wakeup->tv_nsec);
+    printf("process: %lds %ldns\n", wakeup->tv_sec, wakeup->tv_nsec);
+}
+
+size_t fibonacci(size_t n) {
+	if (n == 0) {
+		return 0;
+	} else if (n == 1) {
+		return 1;
+	} else {
+		return fibonacci(n - 1) + fibonacci(n - 2);
+	}
+}
+
 int main(int argc, char *argv[]) {
     struct timespec t0, wakeup_time, process_time, now;
+    size_t num_iterations = DEFAULT_NUM_ITER, i = 0;
+    size_t period = 0, ptime = 0;
 
-    register_app();
+    if ( argc >= 3 ) {
+        period = strtoul(argv[1], NULL, BASE_10);
+        ptime = strtoul(argv[2], NULL, BASE_10);
+
+        if ( argc >= 4 ) {
+            num_iterations = strtoul(argv[3], NULL, BASE_10);
+        }
+    } else {
+        errx(1, "Usage: %s <period> <processing time> <num cycles (optional)>", argv[0]);
+    }
+
+    register_app(period, ptime);
 	if ( !is_app_registered() ) {
         errx(1, "application was not registered...");
     }
@@ -80,17 +128,18 @@ int main(int argc, char *argv[]) {
 	clock_gettime(CLOCK_MONOTONIC, &t0);
 	yield_app();
 
-	while (exists job) {
+	while (i++ < num_iterations) {
         clock_gettime(CLOCK_MONOTONIC, &now);
-        difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
+        timespec_difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
 		
-        do_job();
-		process_time = clock_gettime() - wakeup_time;
-		printf(wakeup_time, process_time);
+        fibonacci(FIBONACCI_NUMBER);
+
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        timespec_difftime(&wakeup_time, &now, &process_time); // process_time = clock_gettime() - wakeup_time;
+		print_wakeup_and_process_times(&wakeup_time, &process_time);
 		yield_app();
 	}
 
 	deregister_app();
 	return 0;
 }
-
