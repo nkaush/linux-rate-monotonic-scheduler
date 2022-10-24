@@ -184,6 +184,12 @@ static void deregister_task(pid_t pid) {
     }
     printk(PREFIX"Unable to deregister pid %d from process list\n", pid);
     spin_unlock(&rp_lock);
+
+    spin_lock(&current_task_lock);
+    if ( curr_task == pcb ) {
+        curr_task = NULL;
+    }
+    spin_unlock(&current_task_lock);
 }
 
 static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buffer, size_t count, loff_t *off) {    

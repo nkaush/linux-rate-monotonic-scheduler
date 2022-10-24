@@ -91,7 +91,7 @@ void timespec_difftime(struct timespec *start, struct timespec *finish, struct t
 
 void print_wakeup_and_process_times(struct timespec *wakeup, struct timespec *process) {
     printf("wakeup:  %lds %ldns\n", wakeup->tv_sec, wakeup->tv_nsec);
-    printf("process: %lds %ldns\n", wakeup->tv_sec, wakeup->tv_nsec);
+    printf("process: %lds %ldns\n", process->tv_sec, process->tv_nsec);
 }
 
 size_t fibonacci(size_t n) {
@@ -105,7 +105,7 @@ size_t fibonacci(size_t n) {
 }
 
 int main(int argc, char *argv[]) {
-    struct timespec t0, wakeup_time, process_time, now;
+    struct timespec t0, wakeup_time, process_time, now, later;
     size_t num_iterations = DEFAULT_NUM_ITER, i = 0;
     size_t period = 0, ptime = 0;
 
@@ -125,17 +125,17 @@ int main(int argc, char *argv[]) {
         errx(1, "application was not registered...");
     }
 
-	clock_gettime(CLOCK_MONOTONIC, &t0);
+	clock_gettime(CLOCK_REALTIME, &t0);
 	yield_app();
 
 	while (i++ < num_iterations) {
-        clock_gettime(CLOCK_MONOTONIC, &now);
+        clock_gettime(CLOCK_REALTIME, &now);
         timespec_difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
 		
         fibonacci(FIBONACCI_NUMBER);
 
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        timespec_difftime(&wakeup_time, &now, &process_time); // process_time = clock_gettime() - wakeup_time;
+        clock_gettime(CLOCK_REALTIME, &later);
+        timespec_difftime(&now, &later, &process_time); // process_time = clock_gettime() - wakeup_time;
 		print_wakeup_and_process_times(&wakeup_time, &process_time);
 		yield_app();
 	}
