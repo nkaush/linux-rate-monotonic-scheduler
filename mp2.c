@@ -152,14 +152,11 @@ static void admit_task(struct mp2_pcb *pcb) {
 static struct mp2_pcb * find_mp2_pcb_by_pid(pid_t pid) {
     struct mp2_pcb *pcb;
 
-    spin_lock(&rp_lock);
     list_for_each_entry(pcb, &task_list_head, list) {
         if ( pcb->pid == pid ) {
-            spin_unlock(&rp_lock);
             return pcb;
         }
     }
-    spin_unlock(&rp_lock);
     return NULL;
 }
 
@@ -171,14 +168,20 @@ static void deregister_task(pid_t pid) {
         if ( pcb->pid == pid ) {
             printk(PREFIX"removing pid %d from process list\n", pid);
             spin_lock(&current_task_lock);
+            printk(PREFIX"Got lock\n");
             if ( current_task == pcb ) {
+                printk(PREFIX"set current_task to NULL\n");
                 current_task = NULL;
             }
             spin_unlock(&current_task_lock);
+            printk(PREFIX"unlock!\n");
             
             _teardown_pcb(pcb);
+            printk(PREFIX"teardown done!\n");
             kmem_cache_free(mp2_pcb_cache, pcb);
+            printk(PREFIX"freed mem!\n");
             spin_unlock(&rp_lock);
+            printk(PREFIX"unlock!\n");
             return;
         }
     }
@@ -236,38 +239,45 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
         pcb->period_ms = period;
         pcb->runtime_ms = proc_time;
         pcb->pid = pid;
-        pcb->state = SLEEPING;
+        pcb->state = RUNNING;
         pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
         timer_setup(&pcb->wakeup_timer, yield_timer_callback, 0);
 
         admit_task(pcb);
-        printk(PREFIX"registered pid %d\n", pid);
+        printk(PREFIX"Current RMS usage: %zu <= %zu", current_rms_usage, RMS_THRESHOLD);
     } else if ( command == 'D' ) { // TRY TO DE-REGISTER PROCESS
         printk(PREFIX"deregister pid %d\n", pid);
         deregister_task(pid);
+        wake_up_process(dispatcher); // wakeup dispatch thread
     } else if ( command == 'Y' ) { // PROCESS YIELDED
         printk(PREFIX"pid %d yielded\n", pid);
 
+        spin_lock(&rp_lock);
         pcb = find_mp2_pcb_by_pid(pid);
-        if ( pcb != NULL ) {
+        if ( pcb != NULL ) { 
             pcb->state = SLEEPING;
             spin_lock(&current_task_lock);
             current_task = NULL;
             spin_unlock(&current_task_lock);
 
             if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
-                // todo how to re-compute deadline??
                 printk(PREFIX"Overshot deadline, keeping ready");
                 pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
                 pcb->state = READY;
-            } else {
+                spin_unlock(&rp_lock);
+            } else { // set timer to wakeup at next period start
                 printk(PREFIX"registering timer to trigger at %zu (now: %zu)\n", pcb->deadline_jiff, jiffies);
                 mod_timer(&pcb->wakeup_timer, pcb->deadline_jiff);
-                pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);    
-                set_current_state(TASK_UNINTERRUPTIBLE); // does this run in context of user process?
-            }
+                pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);
+                spin_unlock(&rp_lock);
+                
+                set_current_state(TASK_UNINTERRUPTIBLE);
+                schedule();
+            } 
 
             wake_up_process(dispatcher); // wakeup dispatch thread
+        } else {
+            spin_unlock(&rp_lock);
         }
     }
 
@@ -285,7 +295,6 @@ void yield_timer_callback(struct timer_list *timer) {
 static struct mp2_pcb * find_next_ready_task(void) {
     struct mp2_pcb *curr_pcb, *ready_task = NULL;
 
-    spin_lock(&rp_lock);
     list_for_each_entry(curr_pcb, &task_list_head, list) {
         // Find the next ready task to run
         if ( curr_pcb->state == READY ) {
@@ -298,7 +307,12 @@ static struct mp2_pcb * find_next_ready_task(void) {
             }
         }
     }
-    spin_unlock(&rp_lock);
+
+    if (ready_task) {
+        printk(KERN_ALERT PREFIX "Found ready task pid=%d\n", ready_task->pid);
+    } else {
+        printk(KERN_ALERT PREFIX "No tasks ready to run\n");
+    }
 
     return ready_task;
 }
@@ -306,7 +320,11 @@ static struct mp2_pcb * find_next_ready_task(void) {
 int dispatcher_work(void *data) {
     struct mp2_pcb *ready_task = NULL;
     struct sched_attr ready_attr, running_attr;
+    int ret;
     (void) data;
+
+    memset(&ready_attr, 0, sizeof(struct sched_attr));
+    memset(&running_attr, 0, sizeof(struct sched_attr));
 
     while (!kthread_should_stop()) {
         printk(PREFIX"-------------------------\n");
@@ -320,11 +338,18 @@ int dispatcher_work(void *data) {
             // Make the Linux scheduler stop this task 
             running_attr.sched_policy = SCHED_NORMAL;
             running_attr.sched_priority = 0;
-            sched_setattr_nocheck(current_task->linux_task, &running_attr);
+            ret = sched_setattr_nocheck(current_task->linux_task, &running_attr);
+            if (ret) {
+                printk(KERN_ALERT PREFIX "sched_setattr_nocheck returned %d", ret);
+            }
+
+            // sched_set_normal(current_task->linux_task, 19);
             current_task = NULL;
         }
+        spin_unlock(&current_task_lock);
         
         // Find the next task to run
+        spin_lock(&rp_lock);
         ready_task = find_next_ready_task();
         if ( ready_task != NULL ) {
             ready_task->state = RUNNING;
@@ -333,12 +358,19 @@ int dispatcher_work(void *data) {
             // Make the Linux scheduler run this task with highest priority
             wake_up_process(ready_task->linux_task);
             ready_attr.sched_policy = SCHED_FIFO;
-            ready_attr.sched_priority = 99;
-            sched_setattr_nocheck(ready_task->linux_task, &ready_attr);
+            ready_attr.sched_priority = MAX_RT_PRIO - 1;
+            ret = sched_setattr_nocheck(ready_task->linux_task, &ready_attr);
+            if (ret) {
+                printk(KERN_ALERT PREFIX "sched_setattr_nocheck returned %d", ret);
+            }
+            // sched_set_fifo(ready_task->linux_task);
 
+            spin_lock(&current_task_lock);
             current_task = ready_task;
+            spin_unlock(&current_task_lock);
         }
-        spin_unlock(&current_task_lock);
+        spin_unlock(&rp_lock);
+        
         printk(PREFIX"-------------------------\n");
 
         ready_task = NULL;

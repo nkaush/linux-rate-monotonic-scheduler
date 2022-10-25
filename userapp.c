@@ -37,7 +37,7 @@ void send_message(char m) {
     }
 
     asprintf(&buf, "%c,%d", m, getpid());
-    fwrite(buf, strlen(buf), 1, f);
+    fwrite(buf, 1, strlen(buf), f);
     fclose(f);
     free(buf);
 }
@@ -127,6 +127,7 @@ int main(int argc, char *argv[]) {
 	yield_app();
 
 	while (i++ < num_iterations) {
+        printf("[%d] iteration %zu\n", getpid(), i);
         clock_gettime(CLOCK_REALTIME, &now);
         timespec_difftime(&t0, &now, &wakeup_time); // wakeup_time = clock_gettime() - t0;
 		
