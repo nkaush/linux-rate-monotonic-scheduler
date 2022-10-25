@@ -261,7 +261,10 @@ static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buf
 
             if (jiffies >= pcb->deadline_jiff) { // we are past the deadline
                 printk(PREFIX"Overshot deadline, keeping ready");
-                pcb->deadline_jiff = jiffies + msecs_to_jiffies(pcb->period_ms);
+                while ( pcb->deadline_jiff < jiffies ) {
+                    pcb->deadline_jiff += msecs_to_jiffies(pcb->period_ms);
+                }
+                
                 pcb->state = READY;
                 spin_unlock(&rp_lock);
             } else { // set timer to wakeup at next period start
