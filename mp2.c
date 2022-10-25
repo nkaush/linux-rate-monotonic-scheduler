@@ -85,7 +85,6 @@ static struct mp2_pcb * find_next_ready_task(void);
 
 static struct mp2_pcb * find_mp2_pcb_by_pid(pid_t pid);
 
-
 // This struct contains callbacks for operations on our procfs entry.
 static const struct proc_ops mp2_file_ops = {
     .proc_read = mp2_proc_read_callback,
@@ -330,6 +329,10 @@ int dispatcher_work(void *data) {
         printk(PREFIX"-------------------------\n");
         printk(PREFIX"Starting scheduling cycle\n");
         // we are pre-empting a currently running task
+        spin_lock(&rp_lock);
+        ready_task = find_next_ready_task();
+        spin_unlock(&rp_lock);
+
         spin_lock(&current_task_lock);
         if ( current_task != NULL ) { 
             printk(PREFIX"Stopping task with pid=%d\n", current_task->pid);
@@ -343,6 +346,10 @@ int dispatcher_work(void *data) {
                 printk(KERN_ALERT PREFIX "sched_setattr_nocheck returned %d", ret);
             }
 
+            if ( !ready_task ) { // if there is no task ready to schedule other than this, schedule this...
+                ready_task = current_task;
+            }
+
             // sched_set_normal(current_task->linux_task, 19);
             current_task = NULL;
         }
@@ -350,7 +357,6 @@ int dispatcher_work(void *data) {
         
         // Find the next task to run
         spin_lock(&rp_lock);
-        ready_task = find_next_ready_task();
         if ( ready_task != NULL ) {
             ready_task->state = RUNNING;
             printk(PREFIX"Starting to work on task with pid=%d\n", ready_task->pid);

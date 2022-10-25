@@ -18,7 +18,7 @@ app: userapp.c userapp.h
 	$(GCC) -o userapp userapp.c
 
 clean:
-	$(RM) -f userapp *~ *.ko *.o *.mod.c Module.symvers modules.order
+	$(RM) -f userapp *~ *.ko *.o *.mod.c Module.symvers modules.ordersl	
 
 wipe: clean
 	find . -name "*.cmd" -delete
