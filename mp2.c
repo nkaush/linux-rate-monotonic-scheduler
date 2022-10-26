@@ -27,12 +27,16 @@ MODULE_DESCRIPTION("CS-423 MP2");
 #define RMS_THRESHOLD 693000UL
 #define RMS_MULTIPLIER 1000000UL
 
+// This enum represents the possible states an application registered with this
+// module can be in throughout its real-time operating loop. 
 enum mp2_task_state {
     READY,
     RUNNING,
     SLEEPING,
 };
 
+// This struct extends the Linux task_struct to store more information and data 
+// about to run real-time scheduling implemented by this kernel module.
 struct mp2_pcb {
     struct timer_list wakeup_timer;
     struct task_struct *linux_task;
@@ -51,10 +55,15 @@ static DEFINE_SPINLOCK(current_task_lock);
 // Spinlock synchronizing reads & writes to our list of processes to schedule
 static DEFINE_SPINLOCK(rp_lock);
 
+// This list keeps track of all the processes to schedule
 static struct list_head task_list_head = LIST_HEAD_INIT(task_list_head);
 static size_t task_list_size = 0;
+
+// Keeps track of the current RMS status to speed up checking whether a task can
+// be admitted to the module or not
 static size_t current_rms_usage = 0;
 
+// A slab allocator cache to speed up allocation of the extended task_structs
 static struct kmem_cache *mp2_pcb_cache;
 
 // A single thread workqueue for our dispatch thread
@@ -63,26 +72,50 @@ static struct task_struct *dispatcher;
 // This proc entry represents the directory mp2 in the procfs 
 static struct proc_dir_entry *proc_dir;
 
+// This read callback is run whenever there is a read to the /proc/mp2/status 
+// proc file system entry. This callback will write all active processes and 
+// their respective processing times and periods to the user buffer, as allowed
+// by the amount requested to read.
 static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, size_t count, loff_t *off);
 
+// This write callback facilitates user applications' interactions with this 
+// module. These interactions allow processes to register and deregister 
+// themselves for scheduled by this module. Processes also interact with this 
+// write callback to yield CPU time when finished with a real-time compute cycle.
 static ssize_t mp2_proc_write_callback(struct file *file, const char __user *buffer, size_t count, loff_t *off);
 
+// Compute the total RMS usage for a given period and runtime. This function is
+// a helper to compute the total RMS usage. 
 static size_t _compute_task_rms_usage(size_t period_ms, size_t runtime_ms);
 
+// Check whether the module can admit a task with a given period and predicted 
+// runtime, according to the Liu and Layland model.
 static int can_admit_task(size_t period_ms, size_t runtime_ms);
 
+// Admit a task to be scheduled by this module. Adds the given extended
+// task_struct to the internal structure of tasks to schedule.
 static void admit_task(struct mp2_pcb *pcb);
 
+// Remove a task from being scheduled by this module.
 static void deregister_task(pid_t pid);
 
+// Destructor to assist in deallocating resources used by the extended task_struct.
 void _teardown_pcb(struct mp2_pcb *pcb);
 
+// This function handles all of the scheduling in its own kthread.
 int dispatcher_work(void *data);
 
+// This function wakes up the kernel thread to begin a scheduling cycle when 
+// a timer triggers this function. 
 void yield_timer_callback(struct timer_list *timer);
 
+// Find a task to run that is in the READY state and has the highest priority
+// (lowest period) of all tasks in the READY state. Returns NULL if no tasks
+// are ready to be scheduled. 
 static struct mp2_pcb * find_next_ready_task(void);
 
+// Find the extended task structure in the module's list of structures by the 
+// given pid. Returns NULL if no such structure is found. 
 static struct mp2_pcb * find_mp2_pcb_by_pid(pid_t pid);
 
 // This struct contains callbacks for operations on our procfs entry.
@@ -98,12 +131,11 @@ static ssize_t mp2_proc_read_callback(struct file *file, char __user *buffer, si
 
     char *kernel_buf = (char *) kzalloc(count, GFP_KERNEL);
    
-   // Go through each entry of the list and read + format the pid and cpu use
+    // Go through each entry of the list and read + format the pid and cpu use
     spin_lock(&rp_lock);
     list_for_each_entry(entry, &task_list_head, list) {
-        if (to_copy >= count) {
-            break;
-        }
+        // if we have written more than can be copied to the user buffer, stop
+        if (to_copy >= count) { break; }
 
         to_copy += 
             snprintf(kernel_buf + to_copy, count - to_copy, 
