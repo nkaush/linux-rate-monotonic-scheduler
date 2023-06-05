@@ -16,11 +16,11 @@
 #include <linux/sched.h>
 
 struct task_struct* find_task_by_pid(unsigned int nr) {
-        struct task_struct* task;
-        rcu_read_lock();
-        task=pid_task(find_vpid(nr), PIDTYPE_PID);
-        rcu_read_unlock();
-        return task;
+    struct task_struct* task;
+    rcu_read_lock();
+    task=pid_task(find_vpid(nr), PIDTYPE_PID);
+    rcu_read_unlock();
+    return task;
 }
 
 MODULE_LICENSE("GPL");
