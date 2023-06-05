@@ -9,7 +9,7 @@ RM:=rm
 
 all: clean modules app
 
-obj-m:= mp2.o
+obj-m:= scheduler.o
 
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SUBDIR) modules
@@ -33,7 +33,7 @@ slab_logs:
 	sudo cat /proc/slabinfo | head -n 10
 
 load:
-	sudo insmod mp2.ko
+	sudo insmod scheduler.ko
 
 unload: 
-	sudo rmmod mp2.ko
+	sudo rmmod scheduler.ko
